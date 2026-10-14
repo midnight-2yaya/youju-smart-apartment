@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.youju.lease.web.app.mapper.TenantLifeMapper">
+
+    <select id="selectMyRoom" resultType="com.youju.lease.web.app.vo.life.MyRoomVo">
+        select la.id           agreement_id,
+               la.apartment_id,
+               la.room_id,
+               ai.name         apartment_name,
+               ri.room_number,
+               (select gi.url
+                from graph_info gi
+                where gi.item_type = 2
+                  and gi.item_id = la.room_id
+                  and gi.is_deleted = 0
+                order by gi.id limit 1) image_url,
+               concat(ifnull(ai.province_name, ''), ifnull(ai.city_name, ''), ifnull(ai.district_name, ''), ifnull(ai.address_detail, '')) address,
+               la.rent,
+               la.lease_start_date,
+               la.lease_end_date
+        from lease_agreement la
+            join apartment_info ai
+        on ai.id = la.apartment_id and ai.is_deleted = 0
+            join room_info ri on ri.id = la.room_id and ri.is_deleted = 0
+        where la.phone = #{phone}
+          and la.status in (1
+            , 2
+            , 7)
+          and la.is_deleted = 0
+        order by field(la.status, 2, 1, 7), la.update_time desc
+            limit 1
+    </select>
+
+    <select id="countBills" resultType="java.lang.Integer">
+        select count(*) from tenant_bill
+        where user_id = #{userId} and billing_period = #{billingPeriod} and is_deleted = 0
+    </select>
+
+    <insert id="insertBill">
+        insert into tenant_bill(user_id, agreement_id, room_id, bill_type, amount, billing_period,
+                                due_date, status, create_time, is_deleted)
+        values (#{userId}, #{agreementId}, #{roomId}, #{billType}, #{amount}, #{billingPeriod},
+                #{dueDate}, 0, now(), 0)
+    </insert>
+
+    <select id="selectBills" resultType="com.youju.lease.web.app.vo.life.BillVo">
+        select id, bill_type,
+               case bill_type when 1 then '房租' when 2 then '电费' when 3 then '水费' else '其他' end bill_type_name,
+               amount, billing_period, due_date, status, paid_time, trade_no
+        from tenant_bill
+        where user_id = #{userId} and is_deleted = 0
+        <if test="billType != null">
+            and bill_type = #{billType}
+        </if>
+        order by status, billing_period desc, id desc
+    </select>
+
+    <select id="selectBill" resultType="com.youju.lease.web.app.vo.life.BillVo">
+        select id, bill_type,
+               case bill_type when 1 then '房租' when 2 then '电费' when 3 then '水费' else '其他' end bill_type_name,
+               amount, billing_period, due_date, status, paid_time, trade_no
+        from tenant_bill
+        where id = #{id} and user_id = #{userId} and is_deleted = 0
+    </select>
+
+    <update id="payBill">
+        update tenant_bill
+        set status = 1, paid_time = now(), trade_no = #{tradeNo}, update_time = now()
+        where id = #{id} and user_id = #{userId} and status = 0 and is_deleted = 0
+    </update>
+
+    <insert id="insertRepair">
+        insert into repair_order(user_id, agreement_id, room_id, description, contact_phone,
+                                 status, create_time, is_deleted)
+        values (#{userId}, #{agreementId}, #{roomId}, #{description}, #{contactPhone}, 0, now(), 0)
+    </insert>
+
+    <select id="selectRepairs" resultType="com.youju.lease.web.app.vo.life.RepairVo">
+        select ro.id, ai.name apartment_name, ri.room_number, ro.description, ro.contact_phone,
+               ro.status,
+               case ro.status when 0 then '待受理' when 1 then '处理中' when 2 then '已完成' else '已取消' end status_name,
+               ro.create_time, ro.update_time
+        from repair_order ro
+                 left join lease_agreement la on la.id = ro.agreement_id
+                 left join apartment_info ai on ai.id = la.apartment_id
+                 left join room_info ri on ri.id = ro.room_id
+        where ro.user_id = #{userId} and ro.is_deleted = 0
+        order by ro.create_time desc
+    </select>
+
+    <insert id="insertPost">
+        insert into community_post(user_id, title, content, like_count, comment_count, status, create_time, is_deleted)
+        values (#{userId}, #{title}, #{content}, 0, 0, 1, now(), 0)
+    </insert>
+
+    <select id="selectPosts" resultType="com.youju.lease.web.app.vo.life.CommunityPostVo">
+        select cp.id, cp.user_id, ui.nickname, ui.avatar_url, cp.title, cp.content,
+               cp.like_count, cp.comment_count, cp.create_time
+        from community_post cp
+                 left join user_info ui on ui.id = cp.user_id
+        where cp.status = 1 and cp.is_deleted = 0
+        order by cp.create_time desc
+        limit 100
+    </select>
+
+    <update id="increaseLike">
+        update community_post set like_count = like_count + 1
+        where id = #{id} and status = 1 and is_deleted = 0
+    </update>
+
+    <insert id="insertMessage">
+        insert into user_message(user_id, title, content, message_type, is_read, biz_id, create_time, is_deleted)
+        values (#{userId}, #{title}, #{content}, #{messageType}, 0, #{bizId}, now(), 0)
+    </insert>
+
+    <select id="selectMessages" resultType="com.youju.lease.web.app.vo.life.MessageVo">
+        select id, title, content, message_type, is_read, biz_id, create_time
+        from user_message
+        where user_id = #{userId} and is_deleted = 0
+        order by is_read, create_time desc
+        limit 100
+    </select>
+
+    <select id="countUnread" resultType="java.lang.Integer">
+        select count(*) from user_message
+        where user_id = #{userId} and is_read = 0 and is_deleted = 0
+    </select>
+
+    <update id="markRead">
+        update user_message set is_read = 1, update_time = now()
+        where id = #{id} and user_id = #{userId} and is_deleted = 0
+    </update>
+
+    <update id="markAllRead">
+        update user_message set is_read = 1, update_time = now()
+        where user_id = #{userId} and is_read = 0 and is_deleted = 0
+    </update>
+
+    <!-- 查询当前用户是否点过赞 -->
+    <select id="countLike" resultType="java.lang.Integer">
+        select count(*) from community_post_like
+        where post_id = #{postId} and user_id = #{userId}
+    </select>
+
+    <!-- 插入点赞记录 -->
+    <insert id="insertLike">
+        insert into community_post_like(post_id, user_id, create_time, is_deleted)
+        values (#{postId}, #{userId}, now(), 0)
+    </insert>
+
+    <!-- 删除点赞记录（取消点赞） -->
+    <delete id="deleteLike">
+        delete from community_post_like
+        where post_id = #{postId} and user_id = #{userId}
+    </delete>
+
+    <!-- 点赞数 -1（注意不要小于0） -->
+    <update id="decreaseLike">
+        update community_post
+        set like_count = case when like_count > 0 then like_count - 1 else 0 end
+        where id = #{id} and status = 1 and is_deleted = 0
+    </update>
+
+    <!-- 分页查询动态（含"我是否点过赞"） -->
+    <select id="selectPostsByPage" resultType="com.youju.lease.web.app.vo.life.CommunityPostVo">
+        select cp.id, cp.user_id, ui.nickname, ui.avatar_url,
+               cp.title, cp.content, cp.like_count, cp.comment_count, cp.create_time,
+               (select count(*) from community_post_like cpl
+                where cpl.post_id = cp.id
+                  and cpl.user_id = #{userId}) liked_by_me
+        from community_post cp
+                 left join user_info ui on ui.id = cp.user_id and ui.is_deleted = 0
+        where cp.status = 1 and cp.is_deleted = 0
+        order by cp.create_time desc
+            limit #{offset}, #{size}
+    </select>
+
+    <!-- 查询动态总数（用于分页） -->
+    <select id="countPosts" resultType="java.lang.Integer">
+        select count(*) from community_post where status = 1 and is_deleted = 0
+    </select>
+
+    <!-- 删除自己的动态 -->
+    <update id="deleteOwnPost">
+        update community_post
+        set is_deleted = 1, update_time = now()
+        where id = #{id} and user_id = #{userId} and is_deleted = 0
+    </update>
+
+    <select id="selectComments" resultType="com.youju.lease.web.app.vo.life.CommunityCommentVo">
+        select c.id, c.post_id, c.user_id,
+               ui.nickname, ui.avatar_url,
+               c.content, c.create_time
+        from community_post_comment c
+                 left join user_info ui on ui.id = c.user_id and ui.is_deleted = 0
+        where c.post_id = #{postId} and c.is_deleted = 0
+        order by c.create_time desc
+            limit 100
+    </select>
+
+    <insert id="insertComment">
+        insert into community_post_comment(post_id, user_id, content, create_time, is_deleted)
+        values (#{postId}, #{userId}, #{content}, now(), 0)
+    </insert>
+
+    <update id="increaseComment">
+        update community_post set comment_count = comment_count + 1
+        where id = #{postId} and is_deleted = 0
+    </update>
+
+    <update id="decreaseComment">
+        update community_post set comment_count = case when comment_count > 0 then comment_count - 1 else 0 end
+        where id = #{postId} and is_deleted = 0
+    </update>
+</mapper>
